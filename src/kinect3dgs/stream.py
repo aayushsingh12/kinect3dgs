@@ -6,6 +6,7 @@ import multiprocessing as mp
 import os
 import secrets
 import signal
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -132,10 +133,12 @@ def _producer(n_slots: int, ring_name: str, conn, stop_evt, lock_exposure: bool,
 class KinectStream:
     def __init__(self, n_slots: int = 8, lock_exposure: bool = False, lock_after_s: float = 3.0,
                  open_timeout: float = 45.0, stall_timeout: float = 5.0, max_restarts: int = 2,
-                 registered: bool = True, _target=_producer, _reset=sensor.reset_camera):
+                 registered: bool = True, usb_wait: float = 90.0, _target=_producer, _reset=sensor.reset_camera):
         self.n_slots, self.lock_exposure, self.lock_after_s = n_slots, lock_exposure, lock_after_s
         self.open_timeout, self.stall_timeout, self.max_restarts = open_timeout, stall_timeout, max_restarts
         self.registered = registered
+        self.usb_wait = usb_wait
+        self._wait_usb_deadline = None
         self._target, self._reset = _target, _reset
         self.stats = StreamStats(registered_depth=registered)
         self.ring: Ring | None = None
@@ -199,6 +202,7 @@ class KinectStream:
                 self._conn.close()
             except OSError:
                 pass
+            self._conn = None
         self._proc = None
 
     def stop(self) -> None:
@@ -264,10 +268,30 @@ class KinectStream:
                 return None
             if self._conn is not None:
                 self._conn.poll(min(0.05, max(0.0, deadline - time.monotonic())))
+            else:
+                time.sleep(0.05)
 
     # --- watchdog ----------------------------------------------------------------
+    @staticmethod
+    def _camera_on_usb() -> bool:
+        return any(d.pid in sensor.CAMERA_PIDS for d in sensor.list_devices())
+
+    def _event(self, name: str, **kw) -> None:
+        self.stats.events.append({"t": round(time.monotonic() - self._t_start, 2), "event": name, **kw})
+
     def _check_watchdog(self) -> None:
         now = time.monotonic()
+        if self._wait_usb_deadline is not None:            # waiting for the Kinect to be plugged back in
+            if self._camera_on_usb():
+                time.sleep(2.0)                              # let the device settle after enumeration
+                self._wait_usb_deadline = None
+                self._event("reconnected")
+                print("Kinect is back, resuming.", file=sys.stderr, flush=True)
+                self._spawn()
+            elif now > self._wait_usb_deadline:
+                self.stop()
+                raise KinectNotFoundError(f"Kinect did not come back within {self.usb_wait:.0f}s", sensor.L0_HINT)
+            return
         dead = self._proc is not None and not self._proc.is_alive() and not self._pending
         limit = self.open_timeout if self.stats.pairs == 0 else self.stall_timeout
         stalled = now - self._last_activity > limit
@@ -276,7 +300,15 @@ class KinectStream:
             self._restart_or_raise(reason)
 
     def _restart_or_raise(self, reason: str) -> None:
-        self.stats.events.append({"t": round(time.monotonic() - self._t_start, 2), "event": "restart", "reason": reason})
+        if self.stats.pairs > 0 and not self._camera_on_usb():
+            # the device vanished from USB (cable, power): wait for it instead of burning restarts
+            self._stop_producer(grace=2.0)
+            self._wait_usb_deadline = time.monotonic() + self.usb_wait
+            self._event("disconnected", reason=reason)
+            print(f"Kinect disconnected ({reason}). Check the cable and AC adapter and plug it back in; "
+                  f"waiting up to {self.usb_wait:.0f}s ...", file=sys.stderr, flush=True)
+            return
+        self._event("restart", reason=reason)
         if self.stats.restarts >= self.max_restarts:
             self.stop()
             if self.stats.pairs == 0:

@@ -11,9 +11,16 @@ from kinect3dgs.stream import KinectStream
 FAKE = str(Path(__file__).parent / "fake_freenect")
 
 
+def _dev(pid):
+    from kinect3dgs.sensor import UsbDevice
+    return [UsbDevice("1-2", "045e", pid, "")]
+
+
 @pytest.fixture
 def fake(monkeypatch):
     assert "freenect" not in sys.modules
+    from kinect3dgs import stream as stream_mod
+    monkeypatch.setattr(stream_mod.sensor, "list_devices", lambda: _dev("02ae"))   # never read the real USB bus
     monkeypatch.syspath_prepend(FAKE)
     monkeypatch.setenv("FAKE_FPS", "100")
     monkeypatch.setenv("FAKE_SKEW_MS", "5")
@@ -103,3 +110,46 @@ def test_exposure_lock_failure_reported(fake):
         while ks.stats.lock_results is None and time.monotonic() - t0 < 30:
             ks.get_pair(0.5)
         assert set(ks.stats.lock_results.values()) == {-1}
+
+
+def test_disconnect_waits_and_resumes(fake, tmp_path):
+    from kinect3dgs import stream as stream_mod
+    fake.setenv("FAKE_MODE", "die_once")
+    fake.setenv("FAKE_DIE_MARKER", str(tmp_path / "died"))
+    gone = {"until": None}
+
+    def list_devices():
+        if (tmp_path / "died").exists() and gone["until"] is None:
+            gone["until"] = time.monotonic() + 2.5            # unplugged for 2.5 s after the producer died
+        absent = gone["until"] is not None and time.monotonic() < gone["until"]
+        return [] if absent else _dev("02ae")
+
+    fake.setattr(stream_mod.sensor, "list_devices", list_devices)
+    ks = KinectStream(open_timeout=30, usb_wait=30, _reset=lambda: None)
+    ks.start()
+    seqs_after = 0
+    t0 = time.monotonic()
+    try:
+        while time.monotonic() - t0 < 60 and seqs_after < 20:
+            p = ks.get_pair(0.5)
+            if p and any(e["event"] == "reconnected" for e in ks.stats.events):
+                seqs_after += 1
+    finally:
+        names = [e["event"] for e in ks.stats.events]
+        ks.stop()
+    assert "disconnected" in names and "reconnected" in names and seqs_after >= 20
+    assert ks.stats.restarts == 0
+
+
+def test_disconnect_never_returns_raises(fake, tmp_path):
+    from kinect3dgs import stream as stream_mod
+    fake.setenv("FAKE_MODE", "die_once")
+    fake.setenv("FAKE_DIE_MARKER", str(tmp_path / "died"))
+    fake.setattr(stream_mod.sensor, "list_devices",
+                 lambda: [] if (tmp_path / "died").exists() else _dev("02ae"))
+    ks = KinectStream(open_timeout=30, usb_wait=2.0, _reset=lambda: None)
+    ks.start()
+    with pytest.raises(KinectNotFoundError):
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 60:
+            ks.get_pair(0.5)

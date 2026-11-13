@@ -69,6 +69,11 @@ def runloop(depth=None, video=None, body=None, dev=None):
                 i += 1
             if mode == "die" and i >= 20:
                 os._exit(1)
+            if mode == "die_once" and i >= 20:
+                marker = os.environ["FAKE_DIE_MARKER"]
+                if not os.path.exists(marker):
+                    open(marker, "w").close()
+                    os._exit(1)
             body(dev, None)
     except Kill:
         pass
