@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools>=70", "Cython>=3,<4", "numpy>=2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "freenect"
+version = "0.7.5+kinect3dgs"
+description = "Upstream libfreenect Cython wrapper, built against the project-local prefix"

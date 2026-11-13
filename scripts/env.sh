@@ -1,0 +1,11 @@
+# Shared paths and pins. Source this; do not execute.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FREENECT_TAG="v0.7.5"
+FREENECT_COMMIT="09a1f098040d00e6070c18174904547ec31d2774"
+FREENECT_URL="https://github.com/OpenKinect/libfreenect"
+PREFIX="$ROOT/.local"
+SRC_DIR="$ROOT/third_party/libfreenect"
+BUILD_DIR="$ROOT/build/libfreenect"
+SYSFS_USB="${KINECT3DGS_SYSFS_USB:-/sys/bus/usb/devices}"
+ETC_ROOT="${KINECT3DGS_ETC:-/etc}"
+export LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
