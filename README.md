@@ -1,42 +1,78 @@
 # kinect3dgs
-Using XBOX 360's Kinect camera (RGBD) to perform 3D Gaussian Splatting
 
-## Getting started (AKS-001)
+Scan with an Xbox 360 Kinect (RGB-D) and produce the COLMAP dataset that 3D Gaussian Splatting tools train from: OpenSplat, gsplat, Nerfstudio, Postshot. This repo contains no splatting code; it ends at the dataset folder.
 
-Needs: Xbox 360 Kinect (tested: model 1473) with its 12 V AC adapter, plugged directly into a USB 2.0 port; `uv`, `cmake`, `libusb`, a C compiler.
+```
+Kinect  ->  record (sessions: RGB + depth)  ->  dataset build (COLMAP)  ->  your 3DGS tool
+```
+
+## Why a depth camera helps
+
+A phone video gives colour only. The Kinect also gives a depth map for every frame, registered to the colour image.
+
+- **Real-world scale.** Photo-only SfM has arbitrary units. Here the depth fixes the scale, so the dataset (and the splat) is in metres. Measured on a table scan: three separate passes gave the same scale within 0.2 %, with a median depth error of 4.5 mm.
+- **Depth is kept per frame.** Every recorded frame keeps its depth map, aligned to the colour image, for later steps (depth-seeded points, depth-aided poses). Today the depth is used for scale only.
+- **Geometry without texture.** Depth does not need surface texture, which is where photo-only methods struggle (plain walls).
+
+Limits: the colour image is 640x480 and soft, depth gets noisy beyond ~4 m (best 0.8-3.5 m), and the colour and depth sensors are not synchronised (up to half a frame apart; the skew is stored per frame). The Kinect needs its 12 V AC adapter and a USB 2.0 port.
+
+## Setup
+
+Needs `uv`, `cmake`, `libusb`, a C compiler and an Xbox 360 Kinect (tested: model 1473).
 
 ```bash
-uv sync --inexact                      # venv on Python 3.12
-bash scripts/build_libfreenect.sh      # libfreenect v0.7.5 -> .local/ (no sudo)
-bash scripts/build_pywrapper.sh        # `freenect` Python module into the venv
+uv sync --inexact                      # Python 3.12 venv
+bash scripts/build_libfreenect.sh      # libfreenect v0.7.5 into .local/ (no sudo, patched camera-only)
+bash scripts/build_pywrapper.sh        # `freenect` Python module
 sudo bash scripts/system_setup.sh      # udev rule + gspca_kinect blacklist; then replug the Kinect
-bash scripts/system_setup.sh --check   # verify (no sudo)
-bash scripts/usb_list.sh               # expect 045e:02ae (camera)
-uv run python -m kinect3dgs.probe      # writes data/probe/<timestamp>/ (git-ignored)
-uv run pytest                          # KINECT_HW=1 uv run pytest -m hardware  with a live Kinect
+bash scripts/usb_list.sh               # expect 045e:02ae (camera: FOUND)
+uv run python -m kinect3dgs.probe      # grabs one RGB + depth frame and checks them
 ```
 
-Notes: the first open of a 1473 unit takes ~6 s (libfreenect resets the audio sibling device); `freenect-camtest` is not usable on this unit because it also opens the audio device; motor/LED/tilt are disabled by `patches/0001-camera-only-subdevices.patch`. See `specs/` (git-ignored) for the full write-up.
+The first camera open takes 8-10 s (normal on the 1473). `freenect-camtest` does not work on this unit; use `probe`.
 
-## Recording a session (AKS-002)
-
-After pulling patch 0002, rebuild once: `bash scripts/build_libfreenect.sh && bash scripts/build_pywrapper.sh`.
+## 1. Record a scan
 
 ```bash
-uv run python -m kinect3dgs.record --seconds 60 --name scan01            # ~10 fps, exposure locked, registered depth
-uv run python -m kinect3dgs.record --seconds 60 --preview                # live view at http://127.0.0.1:8765/
-uv run python -m kinect3dgs.record --mode snapshot --name calib01        # Enter = save a pair, q = finish
+uv run python -m kinect3dgs.record --seconds 90 --preview --name table01
 ```
-Output: `data/sessions/<name>/{session.json, frames.jsonl, rgb/*.png, depth/*.png}` (git-ignored). Depth is 16-bit PNG in millimetres, registered to the RGB image, 0 = invalid. Load with `kinect3dgs.sessions.load_session`. Stop with Ctrl-C (clean); `scripts/clean_shm.sh` removes leaked shared memory after a hard kill.
 
-## Building a COLMAP dataset (AKS-003)
+- Records RGB + registered depth (16-bit PNG, millimetres, 0 = invalid) at ~10 fps (`--every 3` of 30 fps) into `data/sessions/<name>/`.
+- `--preview` shows a live RGB/depth view at `http://127.0.0.1:8765/` (loopback only).
+- `--mode snapshot`: press Enter to save one pair (`q` to finish).
+- Ctrl-C stops cleanly. If the cable is knocked out, it waits up to 90 s for you to plug it back in and carries on.
+- Every frame stores a sharpness score and the RGB/depth time skew.
 
-Turns recorded sessions into the folder 3DGS tools read (`images/` + `sparse/0/` + `dataset.json`). Needs no splatting code.
+Scan tips: move slowly and smoothly, keep 0.8-1.5 m from small subjects (1-3.5 m for rooms), walk around rather than turning on the spot, use steady light, and do two or three passes at different heights. Several sessions can go into one dataset.
+
+## 2. Build the COLMAP dataset
 
 ```bash
 uv run python -m kinect3dgs.dataset build --sessions table01 table02 table03 --out ~/datasets/table
 uv run python -m kinect3dgs.dataset validate ~/datasets/table
 uv run python -m kinect3dgs.dataset info ~/datasets/table
-opensplat ~/datasets/table -n 30000 -o splat.ply        # verified with OpenSplat
 ```
-`--out` picks the folder (default `data/datasets/<name>`); an existing non-empty folder is refused unless it is an old dataset and you pass `--force`. A failed or cancelled build leaves `--out` untouched. Sizes: about 4 min of CPU for ~180 frames. `--progress-jsonl` prints one JSON event per line for a UI; stop with SIGTERM. Metric scale (1 unit = 1 m) comes from the Kinect depth; `--no-metric-scale` turns it off. Tests: `uv run pytest -m colmap` runs the synthetic end-to-end scene (~70 s); `-m "not colmap and not hardware"` is the fast set.
+
+It picks the sharpest frames, runs COLMAP (pycolmap, CPU), applies the metric scale from the depth, undistorts, and writes `images/`, `sparse/0/` and `dataset.json`. About 4 minutes for ~180 frames.
+
+- `--out` chooses the folder (default `data/datasets/<name>`). A non-empty folder is refused unless it is an old dataset and you pass `--force`; it never writes into the project's source folders. A failed or cancelled build leaves `--out` untouched.
+- Quality gates fail the build with advice when fewer than 80 % of frames register, there are too few points, or the error is high.
+- Options: `--target-frames`, `--no-metric-scale`, `--text` (also write COLMAP `.txt`), `--progress-jsonl` (machine-readable progress; SIGTERM cancels).
+
+## 3. Train
+
+```bash
+opensplat ~/datasets/table -n 30000 -o splat.ply
+```
+
+Verified with OpenSplat. The other tools read COLMAP datasets too but have not been tested with this output.
+
+## Other tools
+
+- `python -m kinect3dgs.exposure_check` tests whether the camera's exposure lock works (it does not on the 1473, so auto exposure is the default).
+- `scripts/clean_shm.sh` removes leaked shared memory after a hard kill.
+- Tests: `uv run pytest -m "not hardware and not colmap"` (fast), `-m colmap` (synthetic end-to-end, ~70 s), `KINECT_HW=1 uv run pytest -m hardware` (needs a Kinect).
+
+## Status
+
+Capture and dataset building are done. A minimal guided scan UI (live coaching, then one-click dataset build) is in progress. Design notes live in `specs/` (git-ignored). `data/` holds recordings and datasets (photos of your rooms) and is git-ignored.
