@@ -1,24 +1,14 @@
 # kinect3dgs
 
-Scan with an Xbox 360 Kinect (RGB-D) and produce the COLMAP dataset that 3D Gaussian Splatting tools train from: OpenSplat, gsplat, Nerfstudio, Postshot. This repo contains no splatting code; it ends at the dataset folder.
+Scan with an Xbox 360 Kinect (RGB-D) and produce the COLMAP dataset that 3D Gaussian Splatting tools train from: OpenSplat, gsplat, Nerfstudio, Postshot. The Kinect adds a depth map to every frame, which gives the dataset real-world scale (metres, not arbitrary units) and is kept for later depth-aided steps; today depth is used for scale only. This repo contains no splatting code; it ends at the dataset folder.
 
 ```
 Kinect  ->  record (sessions: RGB + depth)  ->  dataset build (COLMAP)  ->  your 3DGS tool
 ```
 
-## Why a depth camera helps
-
-A phone video gives colour only. The Kinect also gives a depth map for every frame, registered to the colour image.
-
-- **Real-world scale.** Photo-only SfM has arbitrary units. Here the depth fixes the scale, so the dataset (and the splat) is in metres. Measured on a table scan: three separate passes gave the same scale within 0.2 %, with a median depth error of 4.5 mm.
-- **Depth is kept per frame.** Every recorded frame keeps its depth map, aligned to the colour image, for later steps (depth-seeded points, depth-aided poses). Today the depth is used for scale only.
-- **Geometry without texture.** Depth does not need surface texture, which is where photo-only methods struggle (plain walls).
-
-Limits: the colour image is 640x480 and soft, depth gets noisy beyond ~4 m (best 0.8-3.5 m), and the colour and depth sensors are not synchronised (up to half a frame apart; the skew is stored per frame). The Kinect needs its 12 V AC adapter and a USB 2.0 port.
-
 ## Setup
 
-Needs `uv`, `cmake`, `libusb`, a C compiler and an Xbox 360 Kinect (tested: model 1473).
+Needs `uv`, `cmake`, `libusb`, a C compiler and an Xbox 360 Kinect (tested: model 1473) with its 12 V AC adapter on a USB 2.0 port. Colour is 640x480; depth is best at 0.8-3.5 m and noisy beyond ~4 m.
 
 ```bash
 uv sync --inexact                      # Python 3.12 venv
@@ -30,6 +20,18 @@ uv run python -m kinect3dgs.probe      # grabs one RGB + depth frame and checks 
 ```
 
 The first camera open takes 8-10 s (normal on the 1473). `freenect-camtest` does not work on this unit; use `probe`.
+
+### Tested configuration
+
+| | |
+|---|---|
+| Sensor | Xbox 360 Kinect, model **1473**; on USB it shows a hub (`045e:02c2`), audio (`045e:02ad`) and camera (`045e:02ae`), no separate motor device |
+| Connection | plugged straight into the laptop, USB 2.0 (480 Mb/s), with the 12 V AC adapter |
+| Streams | RGB 640x480 and registered depth 640x480 (mm), both at a steady 30 fps |
+| Driver | libfreenect v0.7.5 with local patches: camera only (no motor, LED, tilt or audio) and a `set_flag` wrapper |
+| Host | Arch Linux, kernel 7.2, Python 3.12, pycolmap 4.2.1 (CPU); OpenSplat trained on an RTX 3050 Laptop GPU (4 GB) |
+
+Not tested: the 1414 model, Kinect for Windows, other operating systems. Exposure lock has no effect on the 1473, so auto exposure is used.
 
 ## 1. Record a scan
 
@@ -72,7 +74,3 @@ Verified with OpenSplat. The other tools read COLMAP datasets too but have not b
 - `python -m kinect3dgs.exposure_check` tests whether the camera's exposure lock works (it does not on the 1473, so auto exposure is the default).
 - `scripts/clean_shm.sh` removes leaked shared memory after a hard kill.
 - Tests: `uv run pytest -m "not hardware and not colmap"` (fast), `-m colmap` (synthetic end-to-end, ~70 s), `KINECT_HW=1 uv run pytest -m hardware` (needs a Kinect).
-
-## Status
-
-Capture and dataset building are done. A minimal guided scan UI (live coaching, then one-click dataset build) is in progress. Design notes live in `specs/` (git-ignored). `data/` holds recordings and datasets (photos of your rooms) and is git-ignored.
