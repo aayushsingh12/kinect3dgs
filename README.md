@@ -42,7 +42,7 @@ uv run python -m kinect3dgs.ui --open            # real Kinect
 uv run python -m kinect3dgs.ui --demo --open     # synthetic camera, no hardware
 ```
 
-Flow: check -> setup (name, table/room, output folder) -> guided passes -> build -> copy the OpenSplat command. Keys: `space` record/pause, `n` next pass, `f` finish, `d` depth view, `p` build, `esc` cancel. Each pass is its own session (`<name>_p1..p3`). One live hint at a time: too close, too far, slow down, blurry, too dark, too bright, no depth.
+Flow: check -> setup (name, table/room, output folder; default `data/datasets/<name>`) -> guided passes -> build -> copy the OpenSplat command. Keys: `space` record/pause, `n` next pass, `f` finish, `d` depth view, `p` build, `esc` cancel. Each pass is its own session (`<name>_p1..p3`). One live hint at a time: too close, too far, slow down, blurry, too dark, too bright, no depth.
 
 The sections below are the same steps by command line.
 
@@ -68,7 +68,7 @@ uv run python -m kinect3dgs.dataset validate ~/datasets/table
 uv run python -m kinect3dgs.dataset info ~/datasets/table
 ```
 
-It picks the sharpest frames, runs COLMAP (pycolmap, CPU), applies the metric scale from the depth, undistorts, and writes `images/`, `sparse/0/` and `dataset.json`. About 4 minutes for ~180 frames.
+It picks the sharpest frames, runs COLMAP (pycolmap, CPU), applies the metric scale from the depth, undistorts, and writes `images/`, `sparse/0/` and `dataset.json`. About 1.5-4 minutes for ~200 frames.
 
 - `--out` chooses the folder (default `data/datasets/<name>`). A non-empty folder is refused unless it is an old dataset and you pass `--force`; it never writes into the project's source folders. A failed or cancelled build leaves `--out` untouched.
 - Quality gates fail the build with advice when fewer than 80 % of frames register, there are too few points, or the error is high.
@@ -87,3 +87,46 @@ Verified with OpenSplat. The other tools read COLMAP datasets too but have not b
 - `python -m kinect3dgs.exposure_check` tests whether the camera's exposure lock works (it does not on the 1473, so auto exposure is the default).
 - `scripts/clean_shm.sh` removes leaked shared memory after a hard kill.
 - Tests: `uv run pytest -m "not hardware and not colmap"` (fast), `-m colmap` (synthetic end-to-end, ~70 s), `KINECT_HW=1 uv run pytest -m hardware` (needs a Kinect).
+
+## Results (measured on the author's Kinect)
+
+| Scene | Frames | Registered | Points | Error | Metric scale | OpenSplat (30 000 it.) |
+|---|---|---|---|---|---|---|
+| table, 3 passes of 90 s | 179 | 167 (93 %) | 17 235 | 0.71 px | 70 k depth samples, 4.5 mm median error | 537 s, 44.5 k Gaussians |
+| bedroom, 3 passes of ~3.5 min (guided UI) | 197 | 197 (100 %) | 17 749 | 0.79 px | 120 k samples, passes agree within 0.2 %, 2.5 cm median error | 683 s, 54.1 k Gaussians |
+
+Dataset builds took 231 s (table) and about 100 s (bedroom) on the CPU; training used an RTX 3050 Laptop GPU. Splats look like the photos where the cameras looked (objects and furniture sharp; fabric texture and far background softer, a little haze where few cameras looked). The colour camera is 640x480 and noisy, so splats are only as sharp as that input.
+
+## Limits and ideas
+
+- Depth is used for metric scale only. Seeding the point cloud from depth and depth-aided poses are the next quality steps.
+- Only OpenSplat is verified with the generated folders; Nerfstudio, gsplat and Postshot should read them but are untested.
+- Matching is exhaustive up to 300 frames; above that a sequential + loop-closure mode is used that has not been tested on real data.
+- The 1473's colour sensor ignores the exposure lock, the first camera open takes 8-10 s, and RGB and depth frames are up to half a frame (~16 ms) apart (stored per frame as `skew_ms`).
+- Not tested on hardware: the "plug the cable back in" banner in the UI, and how well the coaching hints match real conditions beyond the author's own scans.
+
+## Troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| `camera: MISSING` in `usb_list.sh` | the Kinect needs its 12 V adapter plugged in at the wall and at the Kinect; replug the USB cable |
+| `Can't open device` / `LIBUSB_ERROR_ACCESS` | run `sudo bash scripts/system_setup.sh`, then replug |
+| Build fails: "only N/M frames registered" | scan slower with more overlap, keep 0.8-1.5 m from small subjects, steady light |
+| Splat hazy in places | add passes covering those angles; keep frames sharp |
+| UI page says forbidden (403) | reload the page (the token changes every time the server starts) |
+| Leftover `/dev/shm/kinect3dgs-*` | `bash scripts/clean_shm.sh` |
+
+## Project layout
+
+```
+src/kinect3dgs/   sensor, stream (Kinect I/O), recorder + record (sessions), probe,
+                  dataset/ (COLMAP dataset builder), ui/ (guided scan page)
+scripts/          libfreenect build, system setup, USB listing
+patches/          local libfreenect patches (camera only, set_flag)
+tools/            offline helpers (coaching threshold tuning)
+tests/            hardware-free tests (fake camera, synthetic scene); hardware tests are opt-in
+data/             sessions, datasets, work files: git-ignored, contains photos of your rooms
+```
+
+Design notes live in `specs/` (git-ignored, written per feature: handoff, PRD, plan, pseudocode, results).
+
