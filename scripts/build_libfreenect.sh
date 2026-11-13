@@ -5,18 +5,13 @@ source "$(dirname "$0")/env.sh"
 for c in git cmake make cc pkg-config; do command -v "$c" >/dev/null || { echo "missing: $c"; exit 1; }; done
 pkg-config --exists libusb-1.0 || { echo "missing libusb-1.0 dev files"; exit 1; }
 
-if [ -f "$PREFIX/lib/libfreenect.so" ] && [ "$(cat "$PREFIX/.installed-tag" 2>/dev/null)" = "$FREENECT_TAG" ]; then
-  echo "libfreenect $FREENECT_TAG already installed in $PREFIX"; exit 0
-fi
 [ -d "$SRC_DIR" ] || git clone --branch "$FREENECT_TAG" --depth 1 "$FREENECT_URL" "$SRC_DIR"
 actual=$(git -C "$SRC_DIR" rev-parse HEAD)
 echo "libfreenect $FREENECT_TAG = $actual"
-# Local patches (camera-only subdevices; see patches/). Idempotent.
-for patch in "$ROOT"/patches/*.patch; do
-  [ -f "$patch" ] || continue
-  if git -C "$SRC_DIR" apply --check -R "$patch" 2>/dev/null; then echo "patch already applied: $(basename "$patch")"
-  else git -C "$SRC_DIR" apply "$patch" && echo "applied $(basename "$patch")"; fi
-done
+apply_patches
+if [ -f "$PREFIX/lib/libfreenect.so" ] && [ "$(cat "$PREFIX/.installed-tag" 2>/dev/null)" = "$INSTALL_MARK" ]; then
+  echo "libfreenect $INSTALL_MARK already installed in $PREFIX"; exit 0
+fi
 if [ -n "$FREENECT_COMMIT" ] && [ "$actual" != "$FREENECT_COMMIT" ]; then echo "tag moved! refusing"; exit 1; fi
 
 configure() {  # $1 = BUILD_EXAMPLES value, rest = extra flags
@@ -41,5 +36,5 @@ if ! cmake --build "$BUILD_DIR" -j"$(nproc)"; then
      -L"$BUILD_DIR/lib" -lfreenect -o "$BUILD_DIR/freenect-camtest" || true
 fi
 cmake --install "$BUILD_DIR"
-echo "$FREENECT_TAG" > "$PREFIX/.installed-tag"
+echo "$INSTALL_MARK" > "$PREFIX/.installed-tag"
 test -f "$PREFIX/lib/libfreenect.so" && test -f "$PREFIX/include/libfreenect/libfreenect_sync.h" && echo "OK"

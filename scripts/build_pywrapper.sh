@@ -4,6 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 [ -f "$PREFIX/lib/libfreenect_sync.so" ] || { echo "run build_libfreenect.sh first"; exit 1; }
 cd "$ROOT"
+apply_patches
 [ -d .venv ] || uv sync --inexact
 cp "$SRC_DIR/wrappers/python/freenect.pyx" pywrapper/freenect.pyx
 mkdir -p build && sha256sum pywrapper/freenect.pyx > build/pywrapper.sha256

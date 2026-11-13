@@ -1,0 +1,56 @@
+diff --git a/wrappers/python/freenect.pyx b/wrappers/python/freenect.pyx
+--- a/wrappers/python/freenect.pyx
++++ b/wrappers/python/freenect.pyx
+@@ -51,6 +51,17 @@
+         FREENECT_DEPTH_REGISTERED
+         FREENECT_DEPTH_MM
+ 
++    ctypedef enum freenect_flag:
++        FREENECT_AUTO_EXPOSURE
++        FREENECT_AUTO_FLICKER
++        FREENECT_AUTO_WHITE_BALANCE
++        FREENECT_RAW_COLOR
++        FREENECT_MIRROR_DEPTH
++        FREENECT_MIRROR_VIDEO
++        FREENECT_NEAR_MODE
++    ctypedef enum freenect_flag_value:
++        FREENECT_OFF
++        FREENECT_ON
+     ctypedef enum freenect_led_options:
+         FREENECT_LED_OFF "LED_OFF"
+         FREENECT_LED_GREEN "LED_GREEN"
+@@ -126,6 +137,7 @@
+     int freenect_stop_video(freenect_device *dev)
+     int freenect_set_tilt_degs(freenect_device *dev, double angle)
+     int freenect_set_led(freenect_device *dev, freenect_led_options option)
++    int freenect_set_flag(freenect_device *dev, freenect_flag flag, freenect_flag_value value)
+     int freenect_update_tilt_state(freenect_device *dev)
+     freenect_raw_tilt_state* freenect_get_tilt_state(freenect_device *dev)
+     void freenect_get_mks_accel(freenect_raw_tilt_state *state, double* x, double* y, double* z)
+@@ -163,6 +175,15 @@
+ DEVICE_MOTOR = FREENECT_DEVICE_MOTOR
+ DEVICE_CAMERA = FREENECT_DEVICE_CAMERA
+ DEVICE_AUDIO = FREENECT_DEVICE_AUDIO
++FLAG_AUTO_EXPOSURE = FREENECT_AUTO_EXPOSURE
++FLAG_AUTO_FLICKER = FREENECT_AUTO_FLICKER
++FLAG_AUTO_WHITE_BALANCE = FREENECT_AUTO_WHITE_BALANCE
++FLAG_RAW_COLOR = FREENECT_RAW_COLOR
++FLAG_MIRROR_DEPTH = FREENECT_MIRROR_DEPTH
++FLAG_MIRROR_VIDEO = FREENECT_MIRROR_VIDEO
++FLAG_NEAR_MODE = FREENECT_NEAR_MODE
++FLAG_OFF = FREENECT_OFF
++FLAG_ON = FREENECT_ON
+ 
+ cdef inline str _format_ptr(void *ptr):
+     if sizeof(void *) == 4:
+@@ -260,6 +281,10 @@
+ def set_tilt_degs(DevPtr dev, float angle):
+     freenect_set_tilt_degs(dev._ptr, angle)
+ 
++def set_flag(DevPtr dev, int flag, int value):
++    """Toggle a camera feature (FLAG_*); returns 0 on success."""
++    return freenect_set_flag(dev._ptr, <freenect_flag> flag, <freenect_flag_value> value)
++
+ def set_led(DevPtr dev, freenect_led_options option):
+     return freenect_set_led(dev._ptr, option)
+ 
