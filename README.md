@@ -97,36 +97,6 @@ Verified with OpenSplat. The other tools read COLMAP datasets too but have not b
 
 Dataset builds took 231 s (table) and about 100 s (bedroom) on the CPU; training used an RTX 3050 Laptop GPU. Splats look like the photos where the cameras looked (objects and furniture sharp; fabric texture and far background softer, a little haze where few cameras looked). The colour camera is 640x480 and noisy, so splats are only as sharp as that input.
 
-## Limits and ideas
 
-- Depth is used for metric scale only. Seeding the point cloud from depth and depth-aided poses are the next quality steps.
-- Only OpenSplat is verified with the generated folders; Nerfstudio, gsplat and Postshot should read them but are untested.
-- Matching is exhaustive up to 300 frames; above that a sequential + loop-closure mode is used that has not been tested on real data.
-- The 1473's colour sensor ignores the exposure lock, the first camera open takes 8-10 s, and RGB and depth frames are up to half a frame (~16 ms) apart (stored per frame as `skew_ms`).
-- Not tested on hardware: the "plug the cable back in" banner in the UI, and how well the coaching hints match real conditions beyond the author's own scans.
 
-## Troubleshooting
-
-| Symptom | What to do |
-|---|---|
-| `camera: MISSING` in `usb_list.sh` | the Kinect needs its 12 V adapter plugged in at the wall and at the Kinect; replug the USB cable |
-| `Can't open device` / `LIBUSB_ERROR_ACCESS` | run `sudo bash scripts/system_setup.sh`, then replug |
-| Build fails: "only N/M frames registered" | scan slower with more overlap, keep 0.8-1.5 m from small subjects, steady light |
-| Splat hazy in places | add passes covering those angles; keep frames sharp |
-| UI page says forbidden (403) | reload the page (the token changes every time the server starts) |
-| Leftover `/dev/shm/kinect3dgs-*` | `bash scripts/clean_shm.sh` |
-
-## Project layout
-
-```
-src/kinect3dgs/   sensor, stream (Kinect I/O), recorder + record (sessions), probe,
-                  dataset/ (COLMAP dataset builder), ui/ (guided scan page)
-scripts/          libfreenect build, system setup, USB listing
-patches/          local libfreenect patches (camera only, set_flag)
-tools/            offline helpers (coaching threshold tuning)
-tests/            hardware-free tests (fake camera, synthetic scene); hardware tests are opt-in
-data/             sessions, datasets, work files: git-ignored, contains photos of your rooms
-```
-
-Design notes live in `specs/` (git-ignored, written per feature: handoff, PRD, plan, pseudocode, results).
 
