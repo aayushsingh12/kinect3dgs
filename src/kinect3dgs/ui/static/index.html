@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kinect3dgs</title>
+<style nonce="__NONCE__">
+:root{--bg:#0d0d0d;--fg:#a8a8a8;--head:#cfcfcf;--dim:#6a6a6a;--ok:#6f8f72;--warn:#a89560;--bad:#a86f6f;--line:#2a2a2a}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace}
+main{max-width:720px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:14px;font-weight:normal;color:var(--head);margin:0 0 18px;letter-spacing:.04em}
+h2{font-size:13px;font-weight:normal;color:var(--head);margin:22px 0 6px}
+p{margin:4px 0}
+[hidden]{display:none!important}
+.dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+.keys{color:var(--dim);margin-top:14px}
+button.k{background:none;border:0;padding:0;margin:0 14px 0 0;font:inherit;color:var(--dim);cursor:pointer}
+button.k:hover,button.k:focus-visible{color:var(--head)}
+button:focus-visible,input:focus-visible{outline:1px dotted var(--dim);outline-offset:3px}
+input{background:var(--bg);color:var(--fg);border:0;border-bottom:1px solid var(--line);font:inherit;padding:2px 0;width:100%}
+label{display:block;margin:8px 0}
+label span{display:inline-block;width:70px;color:var(--dim)}
+label input{width:calc(100% - 74px)}
+.opt{margin-right:14px;color:var(--dim)} .opt.on{color:var(--head)}
+#banner{border-left:2px solid var(--warn);padding-left:10px;margin:0 0 14px;color:var(--warn)}
+img#video{display:block;margin:0 auto;max-width:100%;max-height:56vh;width:auto;height:auto;background:#000;border:1px solid var(--line)}
+#bar{position:relative;height:6px;margin:12px 0 6px;background:var(--line)}
+#bar .band{position:absolute;top:0;bottom:0;background:#3a4a3c}
+#bar .tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--head)}
+#hint{min-height:1.55em;color:var(--warn)}
+.line{height:2px;background:var(--line);margin:10px 0}
+.line i{display:block;height:2px;background:var(--fg);width:0}
+ol{list-style:none;margin:6px 0;padding:0}
+li{display:flex;gap:12px} li .n{width:90px} li .s{width:70px;color:var(--dim)} li.run .s{color:var(--head)} li.done .s{color:var(--ok)} li.err .s{color:var(--bad)}
+code{color:var(--head)}
+.lbl{display:inline-block;width:74px;color:var(--dim)}
+.mt{margin-top:10px}
+.mt2{margin-top:12px}
+.pre{white-space:pre-wrap}
+</style>
+<main>
+<h1>kinect3dgs <span id="demo" class="dim"></span></h1>
+<div id="banner" hidden></div>
+<div id="checks"></div>
+
+<section id="s-setup" hidden>
+  <h2>setup</h2>
+  <label><span>name</span><input id="name" autocomplete="off" spellcheck="false" maxlength="40"></label>
+  <p><span class="lbl">scene</span><button class="k" id="sc-table">[1] table</button><button class="k" id="sc-room">[2] room</button></p>
+  <label><span>output</span><input id="out" autocomplete="off" spellcheck="false" placeholder="default: data/datasets/&lt;name&gt;"></label>
+  <p id="outmsg" class="dim"></p>
+  <div id="plan"></div>
+  <p class="keys"><button class="k" id="go">[enter] start scanning</button><button class="k" id="retry">[r] recheck</button></p>
+  <p id="setupmsg" class="bad"></p>
+</section>
+
+<section id="s-scan" hidden>
+  <img id="video" alt="live view">
+  <p id="instr" class="dim mt"></p>
+  <div id="bar"><i class="band"></i><i class="tick"></i></div>
+  <p id="dist" class="dim"></p>
+  <p id="status"></p>
+  <p id="hint"></p>
+  <p id="count"></p>
+  <p id="scanmsg" class="warn"></p>
+  <p class="keys"><button class="k" id="b-rec">[space] record</button><button class="k" id="b-next">[n] next pass</button><button class="k" id="b-fin">[f] finish</button><button class="k" id="b-depth">[d] depth view</button></p>
+</section>
+
+<section id="s-done1" hidden>
+  <h2>scan finished</h2>
+  <div id="passes"></div>
+  <p id="doneerr" class="warn"></p>
+  <p class="keys"><button class="k" id="b-proc">[p] build dataset</button><button class="k" id="b-reset1">[r] new scan</button></p>
+</section>
+
+<section id="s-proc" hidden>
+  <h2>building dataset</h2>
+  <ol id="stages"></ol>
+  <div class="line"><i id="pline"></i></div>
+  <p class="keys"><button class="k" id="b-cancel">[esc] cancel</button></p>
+</section>
+
+<section id="s-result" hidden>
+  <h2>dataset ready</h2>
+  <div id="res"></div>
+  <p class="dim mt2">train with OpenSplat:</p>
+  <p><code id="cmd"></code></p>
+  <p class="keys"><button class="k" id="b-copy">[c] copy command</button><button class="k" id="b-open">[o] open folder</button><button class="k" id="b-reset2">[r] new scan</button></p>
+</section>
+
+<section id="s-fail" hidden>
+  <h2>failed</h2>
+  <p id="failmsg" class="bad pre"></p>
+  <p class="keys"><button class="k" id="b-reset3">[r] back</button></p>
+</section>
+</main>
+<script nonce="__NONCE__">
+"use strict";
+const T = "__TOKEN__";
+const STAGES = ["select","features","matching","mapping","scale","undistort","export","validate"];
+let S = null, M = {}, scene = "table", view = "rgb", forceNext = false, stages = {}, outTimer = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const mmss = s => { s = Math.max(0, Math.round(s)); return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); };
+
+async function api(path, body) {
+  try {
+    const r = await fetch("/api/" + path, {method: "POST", headers: {"X-Token": T, "Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+    return await r.json();
+  } catch (e) { return {ok: false, error: "server not reachable"}; }
+}
+
+function show(id) {
+  for (const s of ["s-setup","s-scan","s-done1","s-proc","s-result","s-fail"]) $(s).hidden = s !== id;
+}
+
+function renderChecks() {
+  const c = (S && S.checks) || [];
+  $("checks").innerHTML = c.map(x => `<p><span class="${x.ok ? "ok" : "bad"}">${x.ok ? "ok " : "!! "}</span>${esc(x.name.padEnd(8))} <span class="dim">${esc(x.detail)}</span></p>`).join("");
+}
+
+function renderPlan() {
+  const p = S.plans[scene];
+  $("sc-table").style.color = scene === "table" ? "var(--head)" : "";
+  $("sc-room").style.color = scene === "room" ? "var(--head)" : "";
+  $("plan").innerHTML = "<h2>plan</h2>" + p.passes.map((x, i) => `<p><span class="dim">${i + 1}.</span> ${esc(x.text)} <span class="dim">(${mmss(x.seconds)}, ${x.ideal[0]}-${x.ideal[1]} m)</span></p>`).join("");
+}
+
+function validateOut() {
+  clearTimeout(outTimer);
+  outTimer = setTimeout(async () => {
+    const r = await api("validate-out", {out: $("out").value.trim(), name: $("name").value.trim() || "x", plan: scene});
+    $("outmsg").textContent = r.ok ? "" : r.error;
+    $("outmsg").className = r.ok ? "dim" : "bad";
+  }, 300);
+}
+
+function setVideo(on) {
+  const img = $("video");
+  const want = on ? `/video?view=${view}&t=${T}` : "";
+  if (img.getAttribute("src") !== want) { if (want) img.src = want; else img.removeAttribute("src"); }
+}
+
+function render() {
+  if (!S) return;
+  $("demo").textContent = S.demo ? "(demo)" : "";
+  const banner = (M && M.banner) || S.banner;
+  $("banner").hidden = !banner; $("banner").textContent = banner || "";
+  renderChecks();
+  setVideo(S.state === "scanning" || S.state === "opening_camera");
+  switch (S.state) {
+    case "checking": show("s-setup"); $("go").disabled = true; renderPlan(); break;
+    case "ready":
+      show("s-setup"); $("go").disabled = false; renderPlan();
+      if (!$("name").value) $("name").value = S.default_name;
+      break;
+    case "opening_camera": show("s-scan"); $("instr").textContent = "opening camera ..."; $("hint").textContent = ""; break;
+    case "scanning": show("s-scan"); renderScan(); break;
+    case "scan_done": show("s-done1"); renderDone1(); break;
+    case "processing": show("s-proc"); renderStages(); break;
+    case "done": show("s-result"); renderResult(); break;
+    case "failed": show("s-fail"); $("failmsg").textContent = S.error || "failed"; break;
+  }
+}
+
+function renderScan() {
+  const sc = S.scan, plan = S.plan, k = sc.pass_idx, pp = plan.passes[k];
+  $("instr").textContent = `pass ${k + 1}/${plan.passes.length}: ${pp.text}`;
+  $("b-rec").textContent = sc.recording ? "[space] pause" : "[space] record";
+  $("b-next").hidden = k + 1 >= plan.passes.length;
+  $("b-depth").textContent = view === "depth" ? "[d] rgb view" : "[d] depth view";
+  const band = document.querySelector("#bar .band");
+  band.style.left = (pp.ideal[0] / 4.5 * 100) + "%"; band.style.width = ((pp.ideal[1] - pp.ideal[0]) / 4.5 * 100) + "%";
+  renderMetrics();
+}
+
+function renderMetrics() {
+  if (!S || S.state !== "scanning") return;
+  const sc = S.scan, pp = S.plan.passes[sc.pass_idx], m = M || {};
+  const d = m.distance_m;
+  document.querySelector("#bar .tick").style.left = d == null ? "0%" : Math.min(100, d / 4.5 * 100) + "%";
+  $("dist").textContent = d == null ? "distance: no depth" : `distance ${d.toFixed(2)} m   (good ${pp.ideal[0]}-${pp.ideal[1]} m)`;
+  const w = (ok, label, val) => `<span class="${ok ? "ok" : "warn"}">${label} ${val}</span>`;
+  $("status").innerHTML = [
+    w((m.sharpness_ratio ?? 1) >= 0.5, "blur", (m.sharpness_ratio ?? 1) >= 0.5 ? "ok" : "high"),
+    w((m.shift_px ?? 0) <= 8, "speed", (m.shift_px ?? 0) <= 8 ? "ok" : "fast"),
+    w((m.brightness ?? 100) > 45 && (m.brightness ?? 100) < 215, "light", "ok"),
+    `<span class="dim">depth ${Math.round((m.valid_frac ?? 0) * 100)} %</span>`].join("   ");
+  $("hint").textContent = m.hint || "";
+  const frames = m.frames ?? sc.frames, rs = m.rec_s ?? sc.rec_s;
+  $("count").innerHTML = `${sc.recording ? '<span class="bad">rec</span>' : '<span class="dim">paused</span>'}   ${frames} frames   ${mmss(rs)} / ${mmss(pp.seconds)} suggested`;
+}
+
+function renderDone1() {
+  const s = S.scan.sessions || [];
+  $("passes").innerHTML = s.length ? s.map(x => `<p>${esc(x)}</p>`).join("") : '<p class="warn">nothing recorded</p>';
+  $("doneerr").textContent = S.error || "";
+  $("b-proc").hidden = !s.length;
+}
+
+function renderStages() {
+  $("stages").innerHTML = STAGES.map(n => {
+    const e = stages[n] || {}, cls = e.status === "done" ? "done" : e.status === "error" ? "err" : e.status ? "run" : "";
+    const word = e.status === "done" ? "done" : e.status === "error" ? "error" : e.status ? "running" : "waiting";
+    return `<li class="${cls}"><span class="n">${n}</span><span class="s">${word}</span><span class="dim">${esc(e.message || "")} ${e.elapsed_s != null ? e.elapsed_s.toFixed(0) + " s" : ""}</span></li>`;
+  }).join("");
+  const done = STAGES.filter(n => (stages[n] || {}).status === "done").length;
+  $("pline").style.width = (done / STAGES.length * 100) + "%";
+}
+
+function renderResult() {
+  const r = S.result || {};
+  const lines = [["dataset", r.out], ["frames", `${r.registered}/${r.selected} registered`], ["points", r.points],
+                 ["error", `${r.mean_error_px} px`], ["scale", r.metric_scale ? "metric (metres)" : "arbitrary units"], ["time", `${r.elapsed_s} s`]];
+  $("res").innerHTML = lines.map(([k, v]) => `<p><span class="dim">${k.padEnd(8)}</span> ${esc(v)}</p>`).join("") +
+    (r.warnings || []).map(w => `<p class="warn">warning: ${esc(w)}</p>`).join("");
+  $("cmd").textContent = `opensplat ${r.out} -n 30000 -o splat.ply`;
+}
+
+async function act(name, body) {
+  const map = {start: "scan/start", rec: null, next: "scan/next", finish: "scan/finish", process: "process/start", cancel: "process/cancel", reset: "reset", check: "check"};
+  let r;
+  if (name === "rec") r = await api(S.scan.recording ? "scan/pause" : "scan/resume");
+  else r = await api(map[name], body);
+  if (!r.ok) {
+    const msg = r.error || "not possible now";
+    if (S.state === "scanning" || S.state === "opening_camera") { $("scanmsg").textContent = msg; forceNext = /press n again/.test(msg); }
+    else if (S.state === "ready") $("setupmsg").textContent = msg;
+    else if (S.state === "scan_done") $("doneerr").textContent = msg;
+  } else { $("scanmsg").textContent = ""; $("setupmsg").textContent = ""; forceNext = false; }
+  return r;
+}
+
+function start() { stages = {}; return act("start", {name: $("name").value.trim(), plan: scene, out: $("out").value.trim()}); }
+
+document.addEventListener("keydown", e => {
+  if (!S || e.ctrlKey || e.metaKey || e.altKey) return;
+  const typing = e.target.tagName === "INPUT";
+  if (typing) { if (e.key === "Enter") { e.preventDefault(); if (S.state === "ready") start(); } else if (e.key === "Escape") e.target.blur(); return; }
+  const k = e.key.toLowerCase(), st = S.state;
+  if (st === "ready" || st === "checking") {
+    if (k === "1") { scene = "table"; renderPlan(); validateOut(); } else if (k === "2") { scene = "room"; renderPlan(); validateOut(); }
+    else if (k === "r") act("check"); else if (k === "enter" && st === "ready") start();
+  } else if (st === "scanning") {
+    if (k === " ") { e.preventDefault(); act("rec"); }
+    else if (k === "n") act("next", {force: forceNext});
+    else if (k === "f") act("finish");
+    else if (k === "d") { view = view === "rgb" ? "depth" : "rgb"; setVideo(false); setVideo(true); renderScan(); }
+  } else if (st === "scan_done") { if (k === "p") act("process"); else if (k === "r") act("reset"); }
+  else if (st === "processing") { if (e.key === "Escape") act("cancel"); }
+  else if (st === "done") {
+    if (k === "c") navigator.clipboard && navigator.clipboard.writeText($("cmd").textContent);
+    else if (k === "o") api("open-folder"); else if (k === "r") act("reset");
+  } else if (st === "failed") { if (k === "r") act("reset"); }
+});
+
+for (const [id, f] of [["go", start], ["retry", () => act("check")], ["b-rec", () => act("rec")], ["b-next", () => act("next", {force: forceNext})],
+  ["b-fin", () => act("finish")], ["b-proc", () => act("process")], ["b-reset1", () => act("reset")], ["b-cancel", () => act("cancel")],
+  ["b-reset2", () => act("reset")], ["b-reset3", () => act("reset")], ["b-open", () => api("open-folder")],
+  ["b-copy", () => navigator.clipboard && navigator.clipboard.writeText($("cmd").textContent)],
+  ["b-depth", () => { view = view === "rgb" ? "depth" : "rgb"; setVideo(false); setVideo(true); renderScan(); }],
+  ["sc-table", () => { scene = "table"; renderPlan(); validateOut(); }], ["sc-room", () => { scene = "room"; renderPlan(); validateOut(); }]])
+  $(id).addEventListener("click", f);
+$("name").addEventListener("input", validateOut);
+$("out").addEventListener("input", validateOut);
+
+function connect() {
+  const es = new EventSource("/events?t=" + T);
+  es.addEventListener("state", e => { S = JSON.parse(e.data); render(); });
+  es.addEventListener("metrics", e => { M = JSON.parse(e.data); renderMetrics(); });
+  es.addEventListener("progress", e => { const p = JSON.parse(e.data); stages[p.stage] = {status: p.status, message: p.message, elapsed_s: p.elapsed_s}; if (S && S.state === "processing") renderStages(); });
+  es.onerror = () => { /* the browser reconnects by itself; state is re-sent on connect */ };
+}
+connect();
+</script>

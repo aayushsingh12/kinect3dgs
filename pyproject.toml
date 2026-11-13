@@ -16,6 +16,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+kinect3dgs = ["ui/static/*.html"]
+
 [tool.pytest.ini_options]
 addopts = "--strict-markers"
 markers = ["hardware: needs a live Kinect (set KINECT_HW=1)", "colmap: runs real pycolmap SfM (about a minute)"]
