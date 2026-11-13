@@ -1,0 +1,23 @@
+[project]
+name = "kinect3dgs"
+version = "0.1.0"
+description = "Xbox 360 Kinect (RGB-D) to 3D Gaussian Splatting"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = ["numpy>=2.0,<3", "opencv-python-headless>=4.10"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+markers = ["hardware: needs a live Kinect (set KINECT_HW=1)"]
+testpaths = ["tests"]
+pythonpath = ["src"]

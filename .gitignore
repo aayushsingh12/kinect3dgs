@@ -1,0 +1,12 @@
+specs/
+third_party/
+build/
+.local/
+.venv/
+data/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+pywrapper/freenect.pyx
+pywrapper/freenect.c
+pywrapper/build/
