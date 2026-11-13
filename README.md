@@ -74,3 +74,12 @@ Verified with OpenSplat. The other tools read COLMAP datasets too but have not b
 - `python -m kinect3dgs.exposure_check` tests whether the camera's exposure lock works (it does not on the 1473, so auto exposure is the default).
 - `scripts/clean_shm.sh` removes leaked shared memory after a hard kill.
 - Tests: `uv run pytest -m "not hardware and not colmap"` (fast), `-m colmap` (synthetic end-to-end, ~70 s), `KINECT_HW=1 uv run pytest -m hardware` (needs a Kinect).
+## Guided scan UI (AKS-004)
+
+A small local page that guides a scan and then builds the COLMAP dataset. Dark, minimal, keyboard-driven; runs only on `127.0.0.1`.
+
+```bash
+uv run python -m kinect3dgs.ui --open            # real Kinect
+uv run python -m kinect3dgs.ui --demo --open     # synthetic camera, no hardware needed
+```
+Flow: check -> setup (name, table/room, output folder) -> scan in guided passes (`space` record/pause, `n` next pass, `f` finish, `d` depth view) -> `p` build dataset (`esc` cancels) -> copy the OpenSplat command. Each pass is saved as its own session `<name>_p1..p3` under `data/sessions/`. Coaching shows one hint at a time: too close / too far / slow down / blurry / too dark / too bright / no depth. Tests: `uv run pytest -m "not hardware"`.
