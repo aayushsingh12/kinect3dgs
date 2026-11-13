@@ -17,9 +17,8 @@ import numpy as np
 
 from . import sensor
 from .errors import KinectError, KinectNotFoundError, KinectTimeoutError
-from .sessions import SCHEMA_VERSION, write_json_atomic
+from .recorder import SessionRecorder, frame_row, pct  # noqa: F401  (re-exported for compatibility)
 from .stream import KinectStream
-from .writer import PairWriter
 
 MB_PER_PAIR = 0.5          # measured on hardware (PNG level 3, indoor scene); used for the disk pre-check only
 MIN_FREE_BYTES = 2 * 1024**3
@@ -60,17 +59,6 @@ def estimate_bytes(args) -> int:
     return int(pairs * MB_PER_PAIR * 1e6)
 
 
-def frame_row(idx, p, t0, t_pair):
-    gray = cv2.cvtColor(p.rgb, cv2.COLOR_RGB2GRAY)
-    return {"idx": idx, "t_host_s": round(t_pair - t0, 4), "ts_rgb": p.ts_rgb, "ts_depth": p.ts_depth,
-            "skew_ms": round(p.skew_ms, 3), "host_skew_ms": round(p.host_skew_ms, 3), "sharpness": round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 2),
-            "depth_valid_frac": round(float((p.depth > 0).mean()), 4), "bad_pair": bool(p.bad)}
-
-
-def pct(a, q):
-    return float(np.percentile(a, q)) if len(a) else None
-
-
 def main(argv=None) -> int:
     args = parse(argv)
     if args.every < 1:
@@ -108,22 +96,8 @@ def main(argv=None) -> int:
 
     lock = args.exposure == "lock"
     warmup = args.warmup if args.warmup is not None else (args.lock_after + 1.0 if lock else 1.0)
-    root.mkdir(parents=True)
-    started = datetime.now(timezone.utc)
-    meta = {
-        "schema_version": SCHEMA_VERSION, "started_utc": started.isoformat(), "finished_utc": None, "aborted": None,
-        "host": {"kernel": platform.release(), "python": sys.version.split()[0]},
-        "libfreenect": (Path(__file__).resolve().parents[2] / ".local/.installed-tag").read_text().strip()
-        if (Path(__file__).resolve().parents[2] / ".local/.installed-tag").exists() else None,
-        "device": [d.__dict__ for d in devs],
-        "formats": {"rgb": {"mode": "VIDEO_RGB", "size": [640, 480], "dtype": "uint8", "channel_order": "RGB"},
-                    "depth": {"mode": "DEPTH_REGISTERED", "size": [640, 480], "dtype": "uint16", "units": "mm",
-                              "invalid": 0, "registered_to": "rgb"}},
-        "args": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
-        "exposure_lock": {"requested": lock, "results": None},
-        "stats": {}, "events": [], "intrinsics": None,
-    }
-    write_json_atomic(root / "session.json", meta)
+    rec = SessionRecorder(root, {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
+                          devices=devs, lock_requested=lock, png_level=args.png_level)
 
     preview = None
     if args.preview is not None:
@@ -148,10 +122,10 @@ def main(argv=None) -> int:
         threading.Thread(target=stdin_loop, daemon=True).start()
         print("Snapshot mode: press Enter to save a pair, q + Enter to finish.")
 
-    writer = PairWriter(root, png_level=args.png_level)
     stream = KinectStream(lock_exposure=lock, lock_after_s=args.lock_after)
+    rec.base = rec._counters(stream)
     rc, aborted = 0, None
-    n_pairs = n_rec = 0
+    n_pairs = 0
     t0 = time.monotonic()
     try:
         stream.start()
@@ -162,6 +136,7 @@ def main(argv=None) -> int:
                 continue
             now = time.monotonic()
             n_pairs += 1
+            rec.see(p)
             if preview:
                 preview.update(p.rgb, p.depth)
             if t_rec0 is None and now - t0 >= warmup:
@@ -175,19 +150,18 @@ def main(argv=None) -> int:
                 want_snap.clear()
                 take = True
             if take:
-                row = frame_row(n_rec, p, t_rec0 or t0, now)
-                if writer.submit(n_rec, p.rgb, p.depth, row):
-                    n_rec += 1
+                row = rec.record(p, t_rec0 or t0, now)
+                if row is not None:
                     if args.mode == "snapshot":
                         print(f"saved {row['idx']:06d}  depth valid {row['depth_valid_frac']:.0%}  sharpness {row['sharpness']:.0f}")
-                    elif n_rec % 30 == 0:
-                        print(f"{n_rec} pairs recorded, {stream.stats.mean_fps:.1f} fps")
-                if n_rec % 100 == 0 and n_rec and free_bytes(args.out) < 1024**3:
+                    elif rec.n_rec % 30 == 0:
+                        print(f"{rec.n_rec} pairs recorded, {stream.stats.mean_fps:.1f} fps")
+                if rec.n_rec % 100 == 0 and rec.n_rec and free_bytes(args.out) < 1024**3:
                     aborted, rc = "disk_low", 1
                     break
             if t_rec0 is not None and args.seconds and now - t_rec0 >= args.seconds:
                 break
-            if args.frames and n_rec >= args.frames:
+            if args.frames and rec.n_rec >= args.frames:
                 break
         if stop.is_set() or hard.is_set():
             aborted, rc = aborted or "signal", 1 if aborted else 0
@@ -202,35 +176,10 @@ def main(argv=None) -> int:
         aborted, rc = "error", 3
     finally:
         stream.stop()
-        if not hard.is_set():
-            writer.close()
-        else:
-            writer.pool.shutdown(wait=False, cancel_futures=True)
-            writer.jl.close()
         if preview:
             preview.stop()
 
-    st = stream.stats
-    elapsed = (st.t_last - st.t_first) if st.t_first and st.t_last else 0.0
-    meta["finished_utc"] = datetime.now(timezone.utc).isoformat()
-    meta["aborted"] = aborted
-    meta["exposure_lock"]["results"] = st.lock_results
-    meta["exposure_lock"]["applied"] = bool(st.lock_results) and all(isinstance(v, int) and v >= 0 for v in st.lock_results.values())
-    meta["events"] = st.events
-    meta["stats"] = {
-        "pairs_produced": st.pairs, "pairs_recorded": writer.written, "bad_pairs": st.bad_pairs,
-        "unmatched_frames": st.unmatched, "dropped_consumer": st.dropped_consumer, "dropped_writer": writer.dropped,
-        "write_errors": writer.errors, "restarts": st.restarts, "producer_killed": stream.killed,
-        "mean_fps": round(st.mean_fps, 2), "duration_s": round(elapsed, 2),
-        "first_pair_s": round(st.first_pair_s, 2) if st.first_pair_s else None,
-        "skew_ms": {"p50": pct(np.abs(st.skews_ms), 50), "p95": pct(np.abs(st.skews_ms), 95),
-                    "max": float(np.max(np.abs(st.skews_ms))) if st.skews_ms else None},
-        "host_skew_ms": {"p50": pct(st.host_skews_ms, 50), "p95": pct(st.host_skews_ms, 95),
-                         "min": float(np.min(st.host_skews_ms)) if st.host_skews_ms else None,
-                         "max": float(np.max(st.host_skews_ms)) if st.host_skews_ms else None},
-        "bytes_written": writer.bytes, "mean_write_ms": round(writer.mean_write_ms, 2),
-    }
-    write_json_atomic(root / "session.json", meta)
+    meta = rec.close(stream, aborted, hard=hard.is_set())
     s = meta["stats"]
     print(f"\nsession {root}: {s['pairs_recorded']} pairs recorded of {s['pairs_produced']} produced, "
           f"{s['mean_fps']} fps, skew p95 {s['skew_ms']['p95']} ms, dropped consumer/writer "
