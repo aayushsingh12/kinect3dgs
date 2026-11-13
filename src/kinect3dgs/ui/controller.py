@@ -326,7 +326,7 @@ class Controller:
         except UsageError:
             raise
         self.last_out = out
-        self.proc.start(sessions=[str(self.sessions_dir / s) for s in sessions], out=out)
+        self.proc.start(sessions=[str(self.sessions_dir / s) for s in sessions], out=out, name=self.scan["name"])
         self._set_state("processing")
 
     def _cmd_cancel(self) -> None:

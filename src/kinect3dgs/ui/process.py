@@ -19,10 +19,12 @@ class ProcessManager:
         self.result: dict | None = None
         self.tail: list[str] = []
 
-    def start(self, sessions: list[str], out: Path) -> None:
+    def start(self, sessions: list[str], out: Path, name: str | None = None) -> None:
         self.out, self.cancelled, self.result, self.tail = Path(out), False, None, []
         cmd = [sys.executable, "-m", "kinect3dgs.dataset", "build", "--sessions", *sessions, "--out", str(out),
                "--progress-jsonl", "--quiet"]
+        if name:
+            cmd += ["--name", name]
         self.p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         threading.Thread(target=self._read, daemon=True).start()
         threading.Thread(target=self._read_err, daemon=True).start()

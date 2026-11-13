@@ -137,6 +137,7 @@ def test_build_through_the_ui_into_chosen_folder(tmp_path):
         res = cl.state()["result"]
         assert res["ok"] and res["out"] == str(out) and res["registered"] >= 0.9 * res["selected"]
         assert validate_dataset(out).ok
+        assert json.loads((out / "dataset.json").read_text())["name"] == "full"          # scan name, not the joined session names
         stages = []
         while True:
             try:
