@@ -10,3 +10,4 @@ __pycache__/
 pywrapper/freenect.pyx
 pywrapper/freenect.c
 pywrapper/build/
+tests/_artifacts/
