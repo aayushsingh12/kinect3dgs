@@ -28,3 +28,15 @@ uv run python -m kinect3dgs.record --seconds 60 --preview                # live 
 uv run python -m kinect3dgs.record --mode snapshot --name calib01        # Enter = save a pair, q = finish
 ```
 Output: `data/sessions/<name>/{session.json, frames.jsonl, rgb/*.png, depth/*.png}` (git-ignored). Depth is 16-bit PNG in millimetres, registered to the RGB image, 0 = invalid. Load with `kinect3dgs.sessions.load_session`. Stop with Ctrl-C (clean); `scripts/clean_shm.sh` removes leaked shared memory after a hard kill.
+
+## Building a COLMAP dataset (AKS-003)
+
+Turns recorded sessions into the folder 3DGS tools read (`images/` + `sparse/0/` + `dataset.json`). Needs no splatting code.
+
+```bash
+uv run python -m kinect3dgs.dataset build --sessions table01 table02 table03 --out ~/datasets/table
+uv run python -m kinect3dgs.dataset validate ~/datasets/table
+uv run python -m kinect3dgs.dataset info ~/datasets/table
+opensplat ~/datasets/table -n 30000 -o splat.ply        # verified with OpenSplat
+```
+`--out` picks the folder (default `data/datasets/<name>`); an existing non-empty folder is refused unless it is an old dataset and you pass `--force`. A failed or cancelled build leaves `--out` untouched. Sizes: about 4 min of CPU for ~180 frames. `--progress-jsonl` prints one JSON event per line for a UI; stop with SIGTERM. Metric scale (1 unit = 1 m) comes from the Kinect depth; `--no-metric-scale` turns it off. Tests: `uv run pytest -m colmap` runs the synthetic end-to-end scene (~70 s); `-m "not colmap and not hardware"` is the fast set.
